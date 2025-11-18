@@ -27,11 +27,11 @@ def _validate_sql_query(sql: str) -> Dict[str, Any]:
                 "error": f"Operation '{keyword}' is not allowed. Only SELECT queries are permitted."
             }
 
-    # Check if it starts with SELECT
-    if not sql_clean.startswith('SELECT'):
+    # Check if it starts with SELECT or WITH (for CTEs)
+    if not (sql_clean.startswith('SELECT') or sql_clean.startswith('WITH')):
         return {
             "is_valid": False,
-            "error": "Only SELECT queries are allowed."
+            "error": "Only SELECT queries and CTEs (WITH) are allowed."
         }
 
     return {"is_valid": True}
@@ -56,6 +56,25 @@ def test_sql_validation():
         ("SELECT insert_id, update_count FROM stats", True, "Columns 'insert_id' and 'update_count'"),
         ("SELECT executor_name, grant_date FROM permissions", True, "Columns with 'executor' and 'grant'"),
 
+        # Should PASS - CTEs (Common Table Expressions)
+        ("WITH cte AS (SELECT id FROM users) SELECT * FROM cte", True, "Simple CTE with SELECT"),
+        ("""WITH ai_tutor_data AS (
+            SELECT user_id, COUNT(*) as count
+            FROM ai_tutor_user_exercise_progress
+            WHERE updated_at >= CURRENT_DATE - INTERVAL '6 months'
+            GROUP BY user_id
+        )
+        SELECT * FROM ai_tutor_data LIMIT 50""", True, "Complex CTE with aggregation"),
+        ("WITH active_users AS (SELECT * FROM users WHERE status = 'active') SELECT COUNT(*) FROM active_users", True, "CTE with WHERE clause"),
+        ("""WITH RECURSIVE org_chart AS (
+            SELECT id, name, manager_id FROM employees WHERE manager_id IS NULL
+            UNION ALL
+            SELECT e.id, e.name, e.manager_id FROM employees e
+            INNER JOIN org_chart oc ON e.manager_id = oc.id
+        )
+        SELECT * FROM org_chart""", True, "Recursive CTE"),
+        ("with lowercase_cte as (select * from users) select * from lowercase_cte", True, "Lowercase CTE"),
+
         # Should FAIL - Actual dangerous operations
         ("CREATE TABLE test (id INT)", False, "CREATE TABLE statement"),
         ("DROP TABLE users", False, "DROP TABLE statement"),
@@ -66,6 +85,11 @@ def test_sql_validation():
         ("TRUNCATE TABLE users", False, "TRUNCATE statement"),
         ("GRANT SELECT ON users TO public", False, "GRANT statement"),
         ("EXECUTE my_procedure()", False, "EXECUTE statement"),
+
+        # Should FAIL - CTEs with dangerous operations
+        ("WITH cte AS (INSERT INTO users VALUES (1, 'test')) SELECT * FROM cte", False, "CTE with INSERT"),
+        ("WITH cte AS (UPDATE users SET name = 'test') SELECT * FROM cte", False, "CTE with UPDATE"),
+        ("WITH cte AS (DELETE FROM users) SELECT * FROM cte", False, "CTE with DELETE"),
 
         # Edge cases
         ("SELECT * FROM users", True, "Simple SELECT *"),

@@ -175,11 +175,11 @@ class DatabaseMCP:
                     "error": f"Operation '{keyword}' is not allowed. Only SELECT queries are permitted."
                 }
 
-        # Check if it starts with SELECT
-        if not sql_clean.startswith('SELECT'):
+        # Check if it starts with SELECT or WITH (for CTEs)
+        if not (sql_clean.startswith('SELECT') or sql_clean.startswith('WITH')):
             return {
                 "is_valid": False,
-                "error": "Only SELECT queries are allowed."
+                "error": "Only SELECT queries and CTEs (WITH) are allowed."
             }
 
         return {"is_valid": True}
