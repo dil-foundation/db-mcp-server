@@ -8,6 +8,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 import sys
 from typing import Any, Dict, List, Optional
 
@@ -157,57 +158,63 @@ class DatabaseMCP:
     def _validate_sql_query(self, sql: str) -> Dict[str, Any]:
         """Validate SQL query for security (read-only)"""
         sql_clean = sql.strip().upper()
-        
-        # Check for dangerous operations
+
+        # Check for dangerous operations using word boundary matching
         dangerous_keywords = [
-            'DROP', 'DELETE', 'INSERT', 'UPDATE', 'CREATE', 'ALTER', 
+            'DROP', 'DELETE', 'INSERT', 'UPDATE', 'CREATE', 'ALTER',
             'TRUNCATE', 'GRANT', 'REVOKE', 'EXEC', 'EXECUTE'
         ]
-        
+
         for keyword in dangerous_keywords:
-            if keyword in sql_clean:
+            # Use word boundary matching to avoid false positives with column names
+            # e.g., 'created_at' should not match 'CREATE'
+            pattern = r'\b' + re.escape(keyword) + r'\b'
+            if re.search(pattern, sql_clean):
                 return {
                     "is_valid": False,
                     "error": f"Operation '{keyword}' is not allowed. Only SELECT queries are permitted."
                 }
-        
+
         # Check if it starts with SELECT
         if not sql_clean.startswith('SELECT'):
             return {
                 "is_valid": False,
                 "error": "Only SELECT queries are allowed."
             }
-        
+
         return {"is_valid": True}
     
     def _validate_sql_execute(self, sql: str) -> Dict[str, Any]:
         """Validate SQL statement for execution (allows write operations)"""
         sql_clean = sql.strip().upper()
-        
-        # Check for extremely dangerous operations
+
+        # Check for extremely dangerous operations using word boundary matching
         extremely_dangerous = [
             'DROP DATABASE', 'DROP SCHEMA', 'TRUNCATE', 'GRANT', 'REVOKE'
         ]
-        
+
         for keyword in extremely_dangerous:
-            if keyword in sql_clean:
+            # Use word boundary matching for multi-word keywords
+            # For phrases like 'DROP DATABASE', we need to match the whole phrase
+            pattern = r'\b' + re.escape(keyword) + r'\b'
+            if re.search(pattern, sql_clean):
                 return {
                     "is_valid": False,
                     "error": f"Operation '{keyword}' is not allowed for safety reasons."
                 }
-        
+
         # Basic SQL injection protection
         suspicious_patterns = [
             ';--', '/*', '*/', 'xp_', 'sp_', 'exec(', 'execute('
         ]
-        
+
         for pattern in suspicious_patterns:
             if pattern.lower() in sql.lower():
                 return {
                     "is_valid": False,
                     "error": f"Suspicious pattern detected: '{pattern}'"
                 }
-        
+
         return {"is_valid": True}
     
     def _is_write_operation(self, sql: str) -> bool:
